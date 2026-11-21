@@ -84,6 +84,11 @@ h1 {
   gap: 12px;
 }
 
+/* A box with three states */
+.stages.three {
+  grid-template-columns: repeat(3, 1fr);
+}
+
 .stage {
   background: white;
   border: 1px solid #ddd;
@@ -102,7 +107,7 @@ h1 {
   transition: transform 0.15s;
 }
 
-.stage:hover { transform: translateY(-2px); }
+.stage:hover:not(:disabled) { transform: translateY(-2px); }
 .stage:active { transform: scale(0.96); }
 
 .stage small {
@@ -149,8 +154,13 @@ h1 {
   transition: transform 0.15s;
 }
 
-.play:hover, .restart:hover { transform: translateY(-2px); }
-.play:active, .restart:active { transform: scale(0.95); }
+.play:hover:not(:disabled), .restart:hover:not(:disabled) { transform: translateY(-2px); }
+.play:active:not(:disabled), .restart:active:not(:disabled) { transform: scale(0.95); }
+
+.play:disabled, .restart:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 
 /* ---------- Press feedback ---------- */
 
@@ -246,6 +256,7 @@ h1 {
 @media (max-width: 480px) {
   .player { padding: 25px; }
   h1 { font-size: 28px; }
+  .stages.three { grid-template-columns: 1fr; }
 }
 </style>
 </head>
@@ -255,9 +266,10 @@ h1 {
 <div id="bg"></div>
 
 <!-- ============ PLAYER 1 ============ -->
-<!-- data-normal / data-attack = file names, data-start = seconds into the song to begin at -->
-<main class="player" data-normal="normal.wav" data-attack="attack.wav" data-start="20">
-  <div class="eyebrow">Ambience4 - Subcargo (vol. 1)</div>
+<!-- data-tracks = one file per state, separated by |  (first = first state, and so on)
+     data-start  = seconds into the song to begin at -->
+<main class="player" data-tracks="normal.wav|attack.wav" data-start="20">
+  <div class="eyebrow">Reactor - Subcargo (vol. 1)</div>
 
   <h1>Example 1</h1>
 
@@ -291,8 +303,7 @@ h1 {
 </main>
 
 <!-- ============ PLAYER 2 ============ -->
-<!-- data-normal / data-attack = file names, data-start = seconds into the song to begin at -->
-<main class="player" data-normal="ambience4%20(TAIKO%20INSTEAD).mp3" data-attack="ambience4(intense)%20-%20subcargo.mp3" data-start="20">
+<main class="player" data-tracks="ambience4%20(TAIKO%20INSTEAD).mp3|ambience4(intense)%20-%20subcargo.mp3" data-start="20">
   <div class="eyebrow">Far From The Sun - Subcargo (vol.2)</div>
 
   <h1>Example 2</h1>
@@ -326,6 +337,48 @@ h1 {
   </div>
 </main>
 
+<!-- ============ PLAYER 3 (three states) ============ -->
+<!-- No song yet. When you have it, fill in data-tracks with three files in order:
+     Exploration|Discovery|Chase   e.g. data-tracks="exploration.wav|discovery.wav|chase.wav" -->
+<main class="player" data-tracks="" data-start="20">
+  <div class="eyebrow">Song title coming soon</div>
+
+  <h1>Example 3</h1>
+
+  <p class="description">
+    Switch through the states as the song is playing by pressing their individual buttons
+  </p>
+
+  <hr class="divider">
+
+  <div class="state-label">SELECT MUSICAL STATE</div>
+
+  <div class="stages three">
+    <button class="stage active" data-stage="0">
+      01 — Exploration
+      <small>Quiet roaming</small>
+    </button>
+
+    <button class="stage" data-stage="1">
+      02 — Discovery
+      <small>Tension builds</small>
+    </button>
+
+    <button class="stage" data-stage="2">
+      03 — Chase
+      <small>Full pursuit</small>
+    </button>
+  </div>
+
+  <div class="controls">
+    <div class="buttons">
+      <button class="play">▶ Play</button>
+      <button class="restart">↺ Playback</button>
+    </div>
+    <span class="status">Ready to explore</span>
+  </div>
+</main>
+
 <div class="footer">ADAPTIVE MUSIC COMPOSITION</div>
 
 <script>
@@ -340,8 +393,8 @@ let bgVelocity = BG_SPEED;         // current signed speed (eases toward the tar
 let bgX = 0, bgY = 0;
 let bgLast = performance.now();
 
-function setMood(stage) {
-  bgDir = stage === 1 ? -1 : 1;
+function setMood(direction) {
+  bgDir = direction;                 // 1 = drift one way, -1 = the opposite way
 }
 
 // A quick shove of speed in the new direction, so the background "punches"
@@ -379,12 +432,64 @@ function getContext() {
 }
 
 // ---------- Button press feedback ----------
-// level 0 = soft (Play / Playback), 1 = Normal, 2 = Attack (the hardest hit)
+// level 0 = soft (Play / Playback), 1 = calm state, 2 = final state (the hardest hit),
+// 3 = a state in between
 const FEEDBACK = [
   { sparks: 6,  dist: [35, 65],  size: [3, 5], pop: "pop",      shake: false, sharp: false },
   { sparks: 10, dist: [45, 90],  size: [3, 6], pop: "pop",      shake: false, sharp: false },
-  { sparks: 18, dist: [70, 135], size: [4, 9], pop: "pop-hard", shake: true,  sharp: true  }
+  { sparks: 18, dist: [70, 135], size: [4, 9], pop: "pop-hard", shake: true,  sharp: true  },
+  { sparks: 14, dist: [55, 110], size: [3, 7], pop: "pop",      shake: false, sharp: true  }
 ];
+
+// How hard each state hits: the first is calm, the last is the hardest (Attack / Chase)
+function stageLevel(stage, count) {
+  if (stage === count - 1) return 2;
+  if (stage === 0) return 1;
+  return 3;
+}
+
+// Which way the background drifts: the first state one way, the last the opposite way,
+// and anything in between drifts slowly
+function stageMood(stage, count) {
+  if (stage === count - 1) return -1;
+  if (stage === 0) return 1;
+  return 0.3;
+}
+
+// A box with no songs yet: the buttons still react, but there is no audio
+function createPlaceholderPlayer(root) {
+  const buttons = root.querySelectorAll(".stage");
+  const count = buttons.length;
+  let active = 0;
+
+  root.querySelector(".play").disabled = true;
+  root.querySelector(".restart").disabled = true;
+  root.querySelector(".status").textContent = "Song coming soon";
+
+  function show() {
+    buttons.forEach((button, i) => {
+      button.style.setProperty("--level", i === active ? 1 : 0);
+      button.style.setProperty("--outline", i === active ? 1 : 0);
+    });
+  }
+
+  buttons.forEach((button, i) => {
+    button.addEventListener("click", event => {
+      feedback(root, button, event, stageLevel(i, count));
+
+      if (i !== active) {
+        bgKick(Math.sign(stageMood(i, count) - stageMood(active, count)));
+      }
+
+      active = i;
+      setMood(stageMood(i, count));
+      show();
+    });
+  });
+
+  show();
+  return { root, stop() {} };
+}
 
 function rand(min, max) {
   return min + Math.random() * (max - min);
@@ -446,7 +551,14 @@ function feedback(player, button, event, level) {
 }
 
 function createPlayer(root) {
-  const files = [root.dataset.normal, root.dataset.attack];
+  // One file per state, separated by |
+  const files = (root.dataset.tracks || "")
+    .split("|")
+    .map(name => name.trim())
+    .filter(Boolean);
+
+  if (files.length === 0) return createPlaceholderPlayer(root);
+
   const startAt = root.dataset.start !== undefined ? Number(root.dataset.start) : 20;
 
   const audios = files.map(src => {
@@ -456,6 +568,7 @@ function createPlayer(root) {
     return audio;
   });
 
+  const count = audios.length;       // how many states this box has
   const buttons = root.querySelectorAll(".stage");
   const playButton = root.querySelector(".play");
   const restartButton = root.querySelector(".restart");
@@ -531,7 +644,6 @@ function createPlayer(root) {
     requestAnimationFrame(frame);
   }
 
-  // Stops this player completely and resets it to the Normal state
   let fade = null;           // crossfade in progress: { id, from, to, timer }
   let playToken = 0;         // bumped when Play is cancelled, so a late play() does nothing
 
@@ -596,7 +708,7 @@ function createPlayer(root) {
       if (p.root !== root) p.stop();
     });
 
-    setMood(active);         // background follows this song's current state
+    setMood(stageMood(active, count));         // background follows this song's current state
 
     // Mark as playing and put the track at its starting point BEFORE any waiting,
     // so a quick click on Attack can never catch it sitting at 0:00
@@ -667,7 +779,7 @@ function createPlayer(root) {
       audios[next].currentTime = position;
 
       active = next;
-      setMood(next);
+      setMood(stageMood(next, count));
 
       gains.forEach((gain, i) => {
         gain.gain.setValueAtTime(i === active ? 1 : 0, getContext().currentTime);
@@ -684,7 +796,7 @@ function createPlayer(root) {
     fade = { id: myTransition, from: from, to: next, timer: null };
     updateButtons();
     setOutline(next);        // outline switches instantly
-    setMood(next);           // background drifts the other way
+    setMood(stageMood(next, count));           // background drifts the other way
 
     const outgoing = audios[from];
     const incoming = audios[next];
@@ -730,7 +842,7 @@ function createPlayer(root) {
       transitioning = false;
       transitionId++;
       setOutline(from);
-      setMood(from);
+      setMood(stageMood(from, count));
       updateButtons();
       statusText.textContent = "Transition failed";
       console.error(error);
@@ -741,10 +853,12 @@ function createPlayer(root) {
     button.addEventListener("click", event => {
       const stage = Number(button.dataset.stage);
 
-      feedback(root, button, event, stage === 1 ? 2 : 1);
+      feedback(root, button, event, stageLevel(stage, count));
 
       // Give the background a shove when the state actually changes
-      if (stage !== active && !transitioning) bgKick(stage === 1 ? -1 : 1);
+      if (stage !== active && !transitioning) {
+        bgKick(Math.sign(stageMood(stage, count) - stageMood(active, count)));
+      }
 
       changeStage(stage);
     });
