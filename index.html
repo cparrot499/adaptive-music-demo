@@ -166,6 +166,8 @@ ADAPTIVE MUSIC COMPOSITION
 <audio id="audioA" src="./normal.mp3" preload="auto"></audio>
 <audio id="audioB" src="./attack.mp3" preload="auto"></audio>
 
+
+
 <script>
 const audios = [
 document.getElementById("audioA"),
@@ -175,6 +177,12 @@ document.getElementById("audioB")
 const buttons = document.querySelectorAll(".stage");
 const playButton = document.getElementById("play");
 const statusText = document.getElementById("status");
+
+audios.forEach(audio => {
+  audio.addEventListener("error", () => {
+    statusText.textContent = "Couldn't load: " + audio.currentSrc;
+  });
+});
 
 let context;
 let gains = [];
