@@ -299,7 +299,7 @@ h1 {
       <button class="play">▶ Play</button>
       <button class="restart">↺ Playback</button>
     </div>
-    <span class="status">Ready to explore</span>
+    <span class="status">Listen by pressing play</span>
   </div>
 </main>
 
@@ -334,14 +334,14 @@ h1 {
       <button class="play">▶ Play</button>
       <button class="restart">↺ Playback</button>
     </div>
-    <span class="status">Ready to explore</span>
+    <span class="status">Listen by pressing play</span>
   </div>
 </main>
 
 <!-- ============ PLAYER 3 (three states) ============ -->
 <!-- data-tracks = Exploration|Discovery|Chase -->
 <main class="player" data-tracks="anglersnormal.mp3|anglersdiscovery.mp3|anglerschase.mp3" data-start="0">
-  <div class="eyebrow">Song title coming soon</div>
+  <div class="eyebrow">The anglers - No Signal</div>
 
   <h1>Example 3</h1>
 
@@ -375,7 +375,7 @@ h1 {
       <button class="play">▶ Play</button>
       <button class="restart">↺ Playback</button>
     </div>
-    <span class="status">Ready to explore</span>
+    <span class="status">Listen by pressing play</span>
   </div>
 </main>
 
@@ -696,7 +696,7 @@ function createPlayer(root) {
 
     playing = false;
     playButton.textContent = "▶ Play";
-    statusText.textContent = "Ready to explore";
+    statusText.textContent = "Listen by pressing play";
     updateButtons();
   }
 
@@ -786,7 +786,7 @@ function createPlayer(root) {
       });
 
       updateButtons();
-      statusText.textContent = hasStarted ? "Paused" : "Ready to explore";
+      statusText.textContent = hasStarted ? "Paused" : "Listen by pressing play";
       return;
     }
 
