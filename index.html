@@ -256,7 +256,8 @@ h1 {
 @media (max-width: 480px) {
   .player { padding: 25px; }
   h1 { font-size: 28px; }
-  .stages.three { grid-template-columns: 1fr; }
+  .stages.three { gap: 8px; }
+  .stages.three .stage { padding: 14px 10px; font-size: 12px; }
 }
 </style>
 </head>
@@ -338,9 +339,8 @@ h1 {
 </main>
 
 <!-- ============ PLAYER 3 (three states) ============ -->
-<!-- No song yet. When you have it, fill in data-tracks with three files in order:
-     Exploration|Discovery|Chase   e.g. data-tracks="exploration.wav|discovery.wav|chase.wav" -->
-<main class="player" data-tracks="" data-start="20">
+<!-- data-tracks = Exploration|Discovery|Chase -->
+<main class="player" data-tracks="anglersnormal.mp3|anglersdiscovery.mp3|anglerschase.mp3" data-start="0">
   <div class="eyebrow">Song title coming soon</div>
 
   <h1>Example 3</h1>
@@ -356,17 +356,17 @@ h1 {
   <div class="stages three">
     <button class="stage active" data-stage="0">
       01 — Exploration
-      <small>Quiet roaming</small>
+      <small>Finding a new place</small>
     </button>
 
     <button class="stage" data-stage="1">
       02 — Discovery
-      <small>Tension builds</small>
+      <small>You see the monster</small>
     </button>
 
     <button class="stage" data-stage="2">
       03 — Chase
-      <small>Full pursuit</small>
+      <small>The monster sees you</small>
     </button>
   </div>
 
