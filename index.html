@@ -206,10 +206,6 @@ gain.connect(context.destination);
 
 gains.push(gain);
 
-audio.addEventListener("error", () => {
-statusText.textContent =
-"Audio couldn't load: " + audio.currentSrc;
-});
 });
 }
 
