@@ -38,6 +38,7 @@ body {
 }
 
 .player {
+  position: relative;
   width: 100%;
   max-width: 620px;
   background: white;
@@ -96,12 +97,13 @@ h1 {
   background: color-mix(in srgb, #f3f3f0 calc(var(--level) * 100%), white);
   border-color: color-mix(in srgb, #333 calc(var(--outline) * 100%), #ddd);
   box-shadow: 0 0 0 calc(var(--outline) * 1px) #333; /* makes the active outline bolder */
-  transition: transform 0.08s;
+  position: relative;
+  overflow: hidden;                /* keeps the ripple inside the button */
+  transition: transform 0.15s;
 }
 
-.stage:active {
-  transform: scale(0.97);
-}
+.stage:hover { transform: translateY(-2px); }
+.stage:active { transform: scale(0.96); }
 
 .stage small {
   display: block;
@@ -139,6 +141,93 @@ h1 {
   border-radius: 30px;
   padding: 12px 20px;
   cursor: pointer;
+}
+
+.play, .restart {
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.15s;
+}
+
+.play:hover, .restart:hover { transform: translateY(-2px); }
+.play:active, .restart:active { transform: scale(0.95); }
+
+/* ---------- Press feedback ---------- */
+
+/* The button squashes, then springs back past its size */
+.pop      { animation: pop 0.45s cubic-bezier(0.2, 0.8, 0.3, 1); }
+.pop-hard { animation: pop-hard 0.5s cubic-bezier(0.2, 0.8, 0.3, 1); }
+
+@keyframes pop {
+  0%   { transform: scale(1); }
+  25%  { transform: scale(0.93); }
+  55%  { transform: scale(1.045); }
+  80%  { transform: scale(0.995); }
+  100% { transform: scale(1); }
+}
+
+@keyframes pop-hard {
+  0%   { transform: scale(1); }
+  20%  { transform: scale(0.9); }
+  50%  { transform: scale(1.07); }
+  75%  { transform: scale(0.99); }
+  100% { transform: scale(1); }
+}
+
+/* A circle that spreads out from where you pressed, inside the button */
+.ripple {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  margin: -10px 0 0 -10px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.14);
+  pointer-events: none;
+  animation: ripple 0.6s ease-out forwards;
+}
+
+.play .ripple { background: rgba(255, 255, 255, 0.28); }
+
+@keyframes ripple {
+  from { transform: scale(0); opacity: 1; }
+  to   { transform: scale(26); opacity: 0; }
+}
+
+/* Little particles that burst out of the press point */
+.spark {
+  position: absolute;
+  width: var(--size);
+  height: var(--size);
+  margin: calc(var(--size) / -2) 0 0 calc(var(--size) / -2);
+  border-radius: 50%;
+  background: #292929;
+  pointer-events: none;
+  z-index: 5;
+  animation: spark var(--dur) cubic-bezier(0.1, 0.7, 0.3, 1) forwards;
+}
+
+.spark.sharp { border-radius: 1px; }
+
+@keyframes spark {
+  from { transform: translate(0, 0) rotate(0deg) scale(1); opacity: 1; }
+  to   { transform: translate(var(--dx), var(--dy)) rotate(var(--rot)) scale(0); opacity: 0; }
+}
+
+/* Attack hits shake the whole card */
+.player.shake { animation: shake 0.35s; }
+
+@keyframes shake {
+  0%, 100% { transform: translate(0, 0); }
+  15% { transform: translate(-4px, 1px); }
+  30% { transform: translate(4px, -2px); }
+  45% { transform: translate(-3px, 2px); }
+  60% { transform: translate(3px, -1px); }
+  80% { transform: translate(-1px, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spark, .ripple { display: none; }
+  .pop, .pop-hard, .player.shake { animation: none; }
 }
 
 .status {
@@ -259,6 +348,11 @@ function setMood(stage) {
   bgDir = stage === 1 ? -1 : 1;
 }
 
+// A quick shove of speed in the new direction, so the background "punches"
+function bgKick(direction) {
+  bgVelocity += direction * BG_SPEED * 2.5;
+}
+
 function animateBackground(now) {
   const dt = Math.min((now - bgLast) / 1000, 0.1);
   bgLast = now;
@@ -275,7 +369,8 @@ function animateBackground(now) {
 }
 
 // Respect people who ask their device for less motion
-if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+if (!reduceMotion) {
   requestAnimationFrame(animateBackground);
 }
 
@@ -285,6 +380,73 @@ const players = [];          // every player on the page
 function getContext() {
   if (!context) context = new (window.AudioContext || window.webkitAudioContext)();
   return context;
+}
+
+// ---------- Button press feedback ----------
+// level 0 = soft (Play / Playback), 1 = Normal, 2 = Attack (the hardest hit)
+const FEEDBACK = [
+  { sparks: 6,  dist: [35, 65],  size: [3, 5], pop: "pop",      shake: false, sharp: false },
+  { sparks: 10, dist: [45, 90],  size: [3, 6], pop: "pop",      shake: false, sharp: false },
+  { sparks: 18, dist: [70, 135], size: [4, 9], pop: "pop-hard", shake: true,  sharp: true  }
+];
+
+function rand(min, max) {
+  return min + Math.random() * (max - min);
+}
+
+// Removes and re-adds a class so its animation can play again right away
+function replay(el, className) {
+  el.classList.remove(className);
+  void el.offsetWidth;               // forces the browser to restart the animation
+  el.classList.add(className);
+}
+
+function feedback(player, button, event, level) {
+  if (reduceMotion) return;
+
+  const cfg = FEEDBACK[level];
+  const playerRect = player.getBoundingClientRect();
+  const buttonRect = button.getBoundingClientRect();
+
+  // Where the press happened (the button's center for keyboard presses)
+  const hasPoint = event && event.detail > 0;
+  const clientX = hasPoint ? event.clientX : buttonRect.left + buttonRect.width / 2;
+  const clientY = hasPoint ? event.clientY : buttonRect.top + buttonRect.height / 2;
+  const x = clientX - playerRect.left;
+  const y = clientY - playerRect.top;
+
+  // 1. The button squashes and springs back
+  button.classList.remove("pop", "pop-hard");
+  replay(button, cfg.pop);
+
+  // 2. A ripple spreads inside the button
+  const ripple = document.createElement("span");
+  ripple.className = "ripple";
+  ripple.style.left = (clientX - buttonRect.left) + "px";
+  ripple.style.top = (clientY - buttonRect.top) + "px";
+  button.appendChild(ripple);
+  ripple.addEventListener("animationend", () => ripple.remove());
+
+  // 3. Particles burst outward
+  for (let i = 0; i < cfg.sparks; i++) {
+    const angle = (i / cfg.sparks) * Math.PI * 2 + rand(-0.3, 0.3);
+    const distance = rand(cfg.dist[0], cfg.dist[1]);
+
+    const spark = document.createElement("span");
+    spark.className = "spark" + (cfg.sharp ? " sharp" : "");
+    spark.style.left = x + "px";
+    spark.style.top = y + "px";
+    spark.style.setProperty("--dx", Math.cos(angle) * distance + "px");
+    spark.style.setProperty("--dy", Math.sin(angle) * distance + "px");
+    spark.style.setProperty("--size", rand(cfg.size[0], cfg.size[1]) + "px");
+    spark.style.setProperty("--rot", rand(-240, 240) + "deg");
+    spark.style.setProperty("--dur", rand(0.45, 0.8) + "s");
+    player.appendChild(spark);
+    spark.addEventListener("animationend", () => spark.remove());
+  }
+
+  // 4. Attack shakes the whole card
+  if (cfg.shake) replay(player, "shake");
 }
 
 function createPlayer(root) {
@@ -374,8 +536,38 @@ function createPlayer(root) {
   }
 
   // Stops this player completely and resets it to the Normal state
+  let fade = null;           // crossfade in progress: { id, from, to, timer }
+  let playToken = 0;         // bumped when Play is cancelled, so a late play() does nothing
+
+  // Ends a crossfade right now: the new track becomes the active one at full volume
+  function finishTransition() {
+    if (!fade) return;
+
+    clearTimeout(fade.timer);
+    const { from, to } = fade;
+    fade = null;
+    transitionId++;          // also stops the button fade animation
+
+    const now = getContext().currentTime;
+    gains.forEach((gain, i) => {
+      gain.gain.cancelScheduledValues(now);
+      gain.gain.setValueAtTime(i === to ? 1 : 0, now);
+    });
+
+    audios[from].pause();
+    active = to;
+    transitioning = false;
+    updateButtons();
+  }
+
+  // Stops this player completely and resets it to the Normal state
   function stop() {
+    playToken++;             // cancel any Play that is still starting
     transitionId++;          // cancels any pending crossfade cleanup
+    if (fade) {
+      clearTimeout(fade.timer);
+      fade = null;
+    }
     transitioning = false;
 
     audios.forEach(audio => {
@@ -401,6 +593,8 @@ function createPlayer(root) {
   }
 
   async function playMusic() {
+    const myPlay = ++playToken;
+
     // Stop every other player first
     players.forEach(p => {
       if (p.root !== root) p.stop();
@@ -408,26 +602,38 @@ function createPlayer(root) {
 
     setMood(active);         // background follows this song's current state
 
+    // Mark as playing and put the track at its starting point BEFORE any waiting,
+    // so a quick click on Attack can never catch it sitting at 0:00
+    playing = true;
+    playButton.textContent = "Ⅱ Pause";
+    statusText.textContent = "Playing";
+
+    if (!hasStarted) {
+      audios[active].currentTime = startAt;
+      hasStarted = true;
+    }
+
     setupAudio();
     await getContext().resume();
+    if (myPlay !== playToken) return;     // paused or stopped while waiting
 
     try {
-      if (!hasStarted) {
-        audios[active].currentTime = startAt;
-        hasStarted = true;
-      }
-
       await audios[active].play();
-      playing = true;
-      playButton.textContent = "Ⅱ Pause";
-      statusText.textContent = "Playing";
     } catch (error) {
+      // Pause interrupting play() is normal when clicking fast, not a failure
+      if (error.name === "AbortError" || myPlay !== playToken) return;
+
+      playing = false;
+      playButton.textContent = "▶ Play";
       statusText.textContent = "Audio playback failed";
       console.error(error);
     }
   }
 
   function pauseMusic() {
+    playToken++;             // cancels a Play that hasn't finished starting
+    finishTransition();      // settle any crossfade so the right track is active
+
     audios.forEach(audio => audio.pause());
     playing = false;
     playButton.textContent = "▶ Play";
@@ -456,7 +662,14 @@ function createPlayer(root) {
     setupAudio();
     await getContext().resume();
 
+    // Things may have changed while we waited
+    if (next === active || transitioning) return;
+
     if (!playing) {
+      // Keep the same spot in the song when switching while paused / not started
+      const position = hasStarted ? audios[active].currentTime : startAt;
+      audios[next].currentTime = position;
+
       active = next;
       setMood(next);
 
@@ -465,17 +678,19 @@ function createPlayer(root) {
       });
 
       updateButtons();
-      statusText.textContent = "Ready to explore";
+      statusText.textContent = hasStarted ? "Paused" : "Ready to explore";
       return;
     }
 
+    const from = active;
     transitioning = true;
     const myTransition = ++transitionId;
+    fade = { id: myTransition, from: from, to: next, timer: null };
     updateButtons();
     setOutline(next);        // outline switches instantly
     setMood(next);           // background drifts the other way
 
-    const outgoing = audios[active];
+    const outgoing = audios[from];
     const incoming = audios[next];
 
     try {
@@ -485,7 +700,7 @@ function createPlayer(root) {
       const now = getContext().currentTime;
       const duration = 2.5;
 
-      const oldGain = gains[active].gain;
+      const oldGain = gains[from].gain;
       const newGain = gains[next].gain;
 
       oldGain.cancelScheduledValues(now);
@@ -495,29 +710,31 @@ function createPlayer(root) {
       newGain.setValueAtTime(0, now);
 
       // Start the button fade right away so the click feels instant
-      fadeButtons(active, next, now, duration, myTransition);
+      fadeButtons(from, next, now, duration, myTransition);
 
       await incoming.play();
+
+      // Paused or stopped while the new track was starting
+      if (!fade || fade.id !== myTransition) return;
 
       oldGain.linearRampToValueAtTime(0, now + duration);
       newGain.linearRampToValueAtTime(1, now + duration);
 
-      setTimeout(() => {
-        // If stop() ran during the crossfade, do nothing
-        if (myTransition !== transitionId) return;
-
-        outgoing.pause();
-        outgoing.currentTime = 0;
-
-        active = next;
-        transitioning = false;
-
-        updateButtons();
+      fade.timer = setTimeout(() => {
+        if (!fade || fade.id !== myTransition) return;
+        finishTransition();
         statusText.textContent = "Playing";
       }, duration * 1000 + 100);
 
     } catch (error) {
+      // Interrupted by Pause or Stop: not a real failure
+      if (!fade || fade.id !== myTransition) return;
+
+      fade = null;
       transitioning = false;
+      transitionId++;
+      setOutline(from);
+      setMood(from);
       updateButtons();
       statusText.textContent = "Transition failed";
       console.error(error);
@@ -525,10 +742,20 @@ function createPlayer(root) {
   }
 
   buttons.forEach(button => {
-    button.addEventListener("click", () => {
-      changeStage(Number(button.dataset.stage));
+    button.addEventListener("click", event => {
+      const stage = Number(button.dataset.stage);
+
+      feedback(root, button, event, stage === 1 ? 2 : 1);
+
+      // Give the background a shove when the state actually changes
+      if (stage !== active && !transitioning) bgKick(stage === 1 ? -1 : 1);
+
+      changeStage(stage);
     });
   });
+
+  playButton.addEventListener("click", event => feedback(root, playButton, event, 0));
+  restartButton.addEventListener("click", event => feedback(root, restartButton, event, 0));
 
   updateButtons();   // set the starting shade (Normal active)
 
