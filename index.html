@@ -44,6 +44,20 @@ body {
   background-size: 26px 26px, 40px 40px;
 }
 
+/* Small yellow notice at the top of the page */
+.warning {
+  width: 100%;
+  max-width: 620px;
+  background: #fff6c9;
+  border: 1px solid #ecd35a;
+  color: #6b5700;
+  border-radius: 8px;
+  padding: 9px 14px;
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+}
+
 .player {
   position: relative;
   width: 100%;
@@ -272,6 +286,8 @@ h1 {
 <body>
 
 <div id="bg"></div>
+
+<div class="warning" role="note">⚠ Mobile devices may encounter problems making it sound off</div>
 
 <!-- ============ PLAYER 1 ============ -->
 <!-- data-tracks = one file per state, separated by |  (first = first state, and so on)
