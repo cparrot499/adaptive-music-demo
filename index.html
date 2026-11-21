@@ -21,6 +21,22 @@ body {
   padding: 24px;
 }
 
+/* Moving texture behind everything. The script drifts it; its direction flips with the music state. */
+#bg {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-color: #f7f7f5;
+  background-image:
+    radial-gradient(circle, rgba(0, 0, 0, 0.10) 1.2px, transparent 1.7px),
+    linear-gradient(135deg,
+      rgba(0, 0, 0, 0.045) 25%, transparent 25%,
+      transparent 50%, rgba(0, 0, 0, 0.045) 50%,
+      rgba(0, 0, 0, 0.045) 75%, transparent 75%);
+  background-size: 26px 26px, 40px 40px;
+}
+
 .player {
   width: 100%;
   max-width: 620px;
@@ -147,6 +163,8 @@ h1 {
 
 <body>
 
+<div id="bg"></div>
+
 <!-- ============ PLAYER 1 ============ -->
 <!-- data-normal / data-attack = file names, data-start = seconds into the song to begin at -->
 <main class="player" data-normal="normal.wav" data-attack="attack.wav" data-start="20">
@@ -226,6 +244,41 @@ h1 {
 <div class="footer">ADAPTIVE MUSIC COMPOSITION</div>
 
 <script>
+// ---------- Moving background ----------
+// Normal drifts one way, Attack drifts the opposite way.
+// The speed eases through zero, so the turn-around lines up with the 2.5s crossfade.
+const bg = document.getElementById("bg");
+const BG_SPEED = 14;               // pixels per second
+const BG_DIRECTION = { x: 1, y: 0.6 };
+let bgDir = 1;                     // 1 = normal, -1 = attack
+let bgVelocity = BG_SPEED;         // current signed speed (eases toward the target)
+let bgX = 0, bgY = 0;
+let bgLast = performance.now();
+
+function setMood(stage) {
+  bgDir = stage === 1 ? -1 : 1;
+}
+
+function animateBackground(now) {
+  const dt = Math.min((now - bgLast) / 1000, 0.1);
+  bgLast = now;
+
+  bgVelocity += (bgDir * BG_SPEED - bgVelocity) * Math.min(dt * 1.5, 1);
+  bgX += BG_DIRECTION.x * bgVelocity * dt;
+  bgY += BG_DIRECTION.y * bgVelocity * dt;
+
+  // Dots and stripes move at different speeds for a bit of depth
+  bg.style.backgroundPosition =
+    bgX + "px " + bgY + "px, " + (bgX * 0.5) + "px " + (bgY * 0.5) + "px";
+
+  requestAnimationFrame(animateBackground);
+}
+
+// Respect people who ask their device for less motion
+if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+  requestAnimationFrame(animateBackground);
+}
+
 let context;                 // one shared AudioContext for every player
 const players = [];          // every player on the page
 
@@ -353,6 +406,8 @@ function createPlayer(root) {
       if (p.root !== root) p.stop();
     });
 
+    setMood(active);         // background follows this song's current state
+
     setupAudio();
     await getContext().resume();
 
@@ -403,6 +458,7 @@ function createPlayer(root) {
 
     if (!playing) {
       active = next;
+      setMood(next);
 
       gains.forEach((gain, i) => {
         gain.gain.setValueAtTime(i === active ? 1 : 0, getContext().currentTime);
@@ -417,6 +473,7 @@ function createPlayer(root) {
     const myTransition = ++transitionId;
     updateButtons();
     setOutline(next);        // outline switches instantly
+    setMood(next);           // background drifts the other way
 
     const outgoing = audios[active];
     const incoming = audios[next];
