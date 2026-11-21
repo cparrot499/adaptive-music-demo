@@ -8,6 +8,13 @@
 <style>
 * { box-sizing: border-box; }
 
+/* Effects near the screen edge must never make the page wider (phones zoom/resize if they do) */
+html, body {
+  max-width: 100%;
+  overflow-x: hidden;
+  overflow-x: clip;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -270,7 +277,7 @@ h1 {
 <!-- data-tracks = one file per state, separated by |  (first = first state, and so on)
      data-start  = seconds into the song to begin at -->
 <main class="player" data-tracks="normal.wav|attack.wav" data-start="20">
-  <div class="eyebrow">Reactor - Subcargo (vol. 1)</div>
+  <div class="eyebrow">Far From The Sun - Subcargo (vol.2)</div>
 
   <h1>Example 1</h1>
 
@@ -305,7 +312,7 @@ h1 {
 
 <!-- ============ PLAYER 2 ============ -->
 <main class="player" data-tracks="ambience4%20(TAIKO%20INSTEAD).mp3|ambience4(intense)%20-%20subcargo.mp3" data-start="20">
-  <div class="eyebrow">Far From The Sun - Subcargo (vol.2)</div>
+  <div class="eyebrow">Reactor - Subcargo (vol. 1)</div>
 
   <h1>Example 2</h1>
 
@@ -431,6 +438,11 @@ function getContext() {
   return context;
 }
 
+// Phones suspend audio when the screen locks or you switch apps; wake it back up
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && context && context.state !== "running") context.resume();
+});
+
 // ---------- Button press feedback ----------
 // level 0 = soft (Play / Playback), 1 = calm state, 2 = final state (the hardest hit),
 // 3 = a state in between
@@ -533,12 +545,19 @@ function feedback(player, button, event, level) {
     const angle = (i / cfg.sparks) * Math.PI * 2 + rand(-0.3, 0.3);
     const distance = rand(cfg.dist[0], cfg.dist[1]);
 
+    // Keep the end point on screen, so particles can't spill past the edge
+    const edge = 6;
+    const maxX = document.documentElement.clientWidth - edge;
+    const maxY = window.innerHeight - edge;
+    const dx = Math.max(edge - clientX, Math.min(maxX - clientX, Math.cos(angle) * distance));
+    const dy = Math.max(edge - clientY, Math.min(maxY - clientY, Math.sin(angle) * distance));
+
     const spark = document.createElement("span");
     spark.className = "spark" + (cfg.sharp ? " sharp" : "");
     spark.style.left = x + "px";
     spark.style.top = y + "px";
-    spark.style.setProperty("--dx", Math.cos(angle) * distance + "px");
-    spark.style.setProperty("--dy", Math.sin(angle) * distance + "px");
+    spark.style.setProperty("--dx", dx + "px");
+    spark.style.setProperty("--dy", dy + "px");
     spark.style.setProperty("--size", rand(cfg.size[0], cfg.size[1]) + "px");
     spark.style.setProperty("--rot", rand(-240, 240) + "deg");
     spark.style.setProperty("--dur", rand(0.45, 0.8) + "s");
@@ -591,6 +610,8 @@ function createPlayer(root) {
       if (audios[active] === audio && !transitioning) {
         playing = false;
         hasStarted = false;
+        stopSync();
+        audios.forEach(other => other.pause());
         playButton.textContent = "▶ Play";
         statusText.textContent = "Finished";
       }
@@ -646,13 +667,83 @@ function createPlayer(root) {
 
   let fade = null;           // crossfade in progress: { id, from, to, timer }
   let playToken = 0;         // bumped when Play is cancelled, so a late play() does nothing
+  let syncTimer = null;
+
+  // ---------- Keeping the tracks lined up ----------
+  // Every track plays the whole time and only the active one is audible, so
+  // switching states is purely a volume change: no seeking, no waiting for the
+  // network. These helpers keep the silent tracks in time with the audible one.
+
+  function syncTracks() {
+    if (!playing) return;
+    const master = audios[active];
+
+    audios.forEach((audio, i) => {
+      if (i === active || audio.seeking) return;
+      if (fade && i === fade.to) return;        // the track fading in is handled separately
+
+      const drift = audio.currentTime - master.currentTime;   // positive = ahead
+
+      if (Math.abs(drift) > 0.5) {
+        // Far off: jump (with a small lead to cover the time the jump takes)
+        audio.currentTime = master.currentTime + 0.25;
+        audio.playbackRate = 1;
+      } else if (Math.abs(drift) > 0.02) {
+        // A little off: speed up or slow down slightly until it lines up.
+        // The track is silent, so nobody hears the speed change.
+        audio.playbackRate = 1 - Math.max(-0.1, Math.min(0.1, drift));
+      } else {
+        audio.playbackRate = 1;
+      }
+    });
+  }
+
+  function startSync() {
+    stopSync();
+    syncTimer = setInterval(syncTracks, 250);
+  }
+
+  function stopSync() {
+    clearInterval(syncTimer);
+    syncTimer = null;
+    audios.forEach(audio => { audio.playbackRate = 1; });
+  }
+
+  // Waits (at most 3 seconds) until the incoming track is loaded and in time with
+  // the audible one, so the crossfade never starts on a late or out-of-step track
+  function waitUntilLinedUp(incoming, master, cancelled) {
+    return new Promise(resolve => {
+      const started = performance.now();
+
+      (function check() {
+        const signed = incoming.currentTime - master.currentTime;
+        const ready = incoming.readyState >= 3 && !incoming.seeking;
+
+        if (cancelled() || (ready && Math.abs(signed) < 0.06) || performance.now() - started > 3000) {
+          incoming.playbackRate = 1;
+          resolve();
+          return;
+        }
+
+        if (!incoming.seeking) {
+          if (Math.abs(signed) > 0.5) {
+            incoming.currentTime = master.currentTime + 0.25;
+          } else if (Math.abs(signed) > 0.02) {
+            incoming.playbackRate = 1 - Math.max(-0.1, Math.min(0.1, signed));
+          }
+        }
+
+        setTimeout(check, 50);
+      })();
+    });
+  }
 
   // Ends a crossfade right now: the new track becomes the active one at full volume
   function finishTransition() {
     if (!fade) return;
 
     clearTimeout(fade.timer);
-    const { from, to } = fade;
+    const to = fade.to;
     fade = null;
     transitionId++;          // also stops the button fade animation
 
@@ -662,16 +753,16 @@ function createPlayer(root) {
       gain.gain.setValueAtTime(i === to ? 1 : 0, now);
     });
 
-    audios[from].pause();
     active = to;
     transitioning = false;
     updateButtons();
   }
 
-  // Stops this player completely and resets it to the Normal state
+  // Stops this player completely and resets it to the first state
   function stop() {
     playToken++;             // cancel any Play that is still starting
     transitionId++;          // cancels any pending crossfade cleanup
+    stopSync();
     if (fade) {
       clearTimeout(fade.timer);
       fade = null;
@@ -708,38 +799,55 @@ function createPlayer(root) {
       if (p.root !== root) p.stop();
     });
 
-    setMood(stageMood(active, count));         // background follows this song's current state
+    setMood(stageMood(active, count));   // background follows this song's current state
 
-    // Mark as playing and put the track at its starting point BEFORE any waiting,
-    // so a quick click on Attack can never catch it sitting at 0:00
     playing = true;
     playButton.textContent = "Ⅱ Pause";
     statusText.textContent = "Playing";
 
+    // Put every track at the same spot
     if (!hasStarted) {
-      audios[active].currentTime = startAt;
+      audios.forEach(audio => { audio.currentTime = startAt; });
       hasStarted = true;
+    } else {
+      const here = audios[active].currentTime;
+      audios.forEach((audio, i) => { if (i !== active) audio.currentTime = here; });
     }
 
     setupAudio();
-    await getContext().resume();
-    if (myPlay !== playToken) return;     // paused or stopped while waiting
+
+    // Start EVERY track together (inside the click, which phones require).
+    // Only the active one is audible; the others play silently so that
+    // switching later is instant.
+    const resume = getContext().resume();
+    const starts = audios.map(audio => {
+      const started = audio.play();
+      started.catch(() => {});           // a silent track failing is not worth reporting
+      return started;
+    });
 
     try {
-      await audios[active].play();
+      await resume;
+      await starts[active];              // only the audible track has to start
     } catch (error) {
       // Pause interrupting play() is normal when clicking fast, not a failure
       if (error.name === "AbortError" || myPlay !== playToken) return;
 
       playing = false;
+      audios.forEach(audio => audio.pause());
       playButton.textContent = "▶ Play";
       statusText.textContent = "Audio playback failed";
       console.error(error);
+      return;
     }
+
+    if (myPlay !== playToken) return;    // paused or stopped while starting
+    startSync();
   }
 
   function pauseMusic() {
     playToken++;             // cancels a Play that hasn't finished starting
+    stopSync();
     finishTransition();      // settle any crossfade so the right track is active
 
     audios.forEach(audio => audio.pause());
@@ -768,10 +876,7 @@ function createPlayer(root) {
     if (next === active || transitioning) return;
 
     setupAudio();
-    await getContext().resume();
-
-    // Things may have changed while we waited
-    if (next === active || transitioning) return;
+    getContext().resume();
 
     if (!playing) {
       // Keep the same spot in the song when switching while paused / not started
@@ -795,58 +900,42 @@ function createPlayer(root) {
     const myTransition = ++transitionId;
     fade = { id: myTransition, from: from, to: next, timer: null };
     updateButtons();
-    setOutline(next);        // outline switches instantly
-    setMood(stageMood(next, count));           // background drifts the other way
+    setOutline(next);                            // outline switches instantly
+    setMood(stageMood(next, count));             // background drifts the other way
 
-    const outgoing = audios[from];
-    const incoming = audios[next];
+    // Normally this returns at once. On a phone it can wait a moment for the
+    // new track to catch up, instead of fading in a late or out-of-step track.
+    await waitUntilLinedUp(
+      audios[next],
+      audios[from],
+      () => !fade || fade.id !== myTransition
+    );
 
-    try {
-      const position = outgoing.currentTime;
-      incoming.currentTime = Math.min(position, incoming.duration || position);
+    // Paused or stopped while waiting
+    if (!fade || fade.id !== myTransition) return;
 
-      const now = getContext().currentTime;
-      const duration = 2.5;
+    const now = getContext().currentTime;
+    const duration = 2.5;
 
-      const oldGain = gains[from].gain;
-      const newGain = gains[next].gain;
+    const oldGain = gains[from].gain;
+    const newGain = gains[next].gain;
 
-      oldGain.cancelScheduledValues(now);
-      newGain.cancelScheduledValues(now);
+    oldGain.cancelScheduledValues(now);
+    newGain.cancelScheduledValues(now);
 
-      oldGain.setValueAtTime(oldGain.value, now);
-      newGain.setValueAtTime(0, now);
+    oldGain.setValueAtTime(1, now);
+    newGain.setValueAtTime(0, now);
 
-      // Start the button fade right away so the click feels instant
-      fadeButtons(from, next, now, duration, myTransition);
+    oldGain.linearRampToValueAtTime(0, now + duration);
+    newGain.linearRampToValueAtTime(1, now + duration);
 
-      await incoming.play();
+    fadeButtons(from, next, now, duration, myTransition);
 
-      // Paused or stopped while the new track was starting
+    fade.timer = setTimeout(() => {
       if (!fade || fade.id !== myTransition) return;
-
-      oldGain.linearRampToValueAtTime(0, now + duration);
-      newGain.linearRampToValueAtTime(1, now + duration);
-
-      fade.timer = setTimeout(() => {
-        if (!fade || fade.id !== myTransition) return;
-        finishTransition();
-        statusText.textContent = "Playing";
-      }, duration * 1000 + 100);
-
-    } catch (error) {
-      // Interrupted by Pause or Stop: not a real failure
-      if (!fade || fade.id !== myTransition) return;
-
-      fade = null;
-      transitioning = false;
-      transitionId++;
-      setOutline(from);
-      setMood(stageMood(from, count));
-      updateButtons();
-      statusText.textContent = "Transition failed";
-      console.error(error);
-    }
+      finishTransition();
+      statusText.textContent = "Playing";
+    }, duration * 1000 + 100);
   }
 
   buttons.forEach(button => {
